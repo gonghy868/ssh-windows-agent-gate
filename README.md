@@ -158,13 +158,88 @@ Set-Content D:\\agent-user\\workspace\\output.txt -Value "hello"
 New-Item -ItemType Directory D:\\agent-user\\workspace\\projects\\ -Force
 ```
 
-### File Transfer
+### File Transfer: How data moves between cloud and Windows
 
-SCP/SFTP are **not supported** — ForceCommand intercepts the SCP protocol before PowerShell runs, and Gate's output banner corrupts SCP's binary protocol.
+This is the #1 question people ask about this setup. Here's the complete picture.
 
-Workaround for file transfer:
-1. **Small files (<10MB):** Base64 encode → write to temp file → decode via .NET method chain
-2. **Large files:** Temporarily disable ForceCommand for admin user, transfer via SCP, re-enable
+#### What works and what doesn't
+
+| Method | Works with Gate? | Why |
+|--------|-----------------|-----|
+| `ssh user@host "Get-Content file.txt"` (read via SSH) | ✅ **Yes** | Read whitelist, no path restriction |
+| `ssh user@host "Set-Content workspace\file.txt -Value ..."` (write via SSH) | ✅ **Yes** | Write restricted to workspace |
+| `scp user@host:file.txt .` | ❌ **No** | SCP binary protocol corrupted by Gate |
+| `sftp user@host` | ❌ **No** | Same reason — ForceCommand breaks SFTP |
+| Cloud sync (Dropbox / OneDrive / Nextcloud) | ✅ **Yes** | Independent of Gate entirely |
+
+So the flow is: **SSH commands for everything, SCP/SFTP is not needed.**
+
+#### Complete walkthrough: Getting a file from Windows to the cloud
+
+Say you want your cloud agent to analyze `C:\Users\me\Documents\report.pdf`:
+
+**Step 1 — Read the file (agent initiates from cloud)**
+
+```bash
+# SSH into Windows, read file as text
+ssh agent-user@windows-pc "Get-Content 'C:\Users\me\Documents\report.pdf' -Raw"
+```
+
+For binary files (PDF, images, Excel), read as base64:
+
+```bash
+ssh agent-user@windows-pc "[Convert]::ToBase64String([System.IO.File]::ReadAllBytes('C:\Users\me\Documents\report.pdf'))"
+```
+
+**Step 2 — The agent processes it** (on the cloud VM, no file movement needed)
+
+The agent has the content in its context. It can analyze, summarize, extract data, whatever.
+
+**Step 3 — Write results back to Windows (agent initiates from cloud)**
+
+```bash
+# Write a report to the workspace folder
+ssh agent-user@windows-pc "Set-Content 'D:\agent-user\workspace\analysis-report.md' -Value '# Analysis Results\n...'"
+```
+
+The file lands at `D:\agent-user\workspace\analysis-report.md` on your Windows desktop. Open it directly.
+
+#### Reverse flow: Getting a file from cloud to Windows
+
+Say your cloud agent generated a chart image:
+
+```bash
+# On the cloud VM, encode the file
+BASE64=$(base64 -w0 /home/ubuntu/output/chart.png)
+
+# Write it to Windows workspace via SSH
+ssh agent-user@windows-pc "Set-Content 'D:\agent-user\workspace\chart.b64' -Value '$BASE64'"
+
+# Decode it on Windows (still via SSH, all through Gate)
+ssh agent-user@windows-pc "[System.IO.File]::WriteAllBytes('D:\agent-user\workspace\chart.png', [System.Convert]::FromBase64String([System.IO.File]::ReadAllText('D:\agent-user\workspace\chart.b64').Trim()))"
+
+# Clean up the temp base64 file
+ssh agent-user@windows-pc "Remove-Item 'D:\agent-user\workspace\chart.b64'"
+```
+
+#### The workspace pattern
+
+The `D:\agent-user\workspace\` directory is the **shared bridge**:
+- The agent writes files there → they appear on your Windows immediately
+- You put files there → the agent can read them
+- Think of it like a shared folder or a network drive, but secured by Gate
+
+#### If you really want SCP/SFTP
+
+Temporarily disable ForceCommand for an admin user, transfer, re-enable:
+
+```powershell
+# As admin, edit C:\ProgramData\ssh\sshd_config, comment out ForceCommand line
+# Restart SSH service, transfer files as admin, then uncomment and restart
+Restart-Service sshd
+```
+
+Not recommended for routine use — it's a temporary hole in the security model.
 
 ### Claude Code Integration (Experimental)
 
