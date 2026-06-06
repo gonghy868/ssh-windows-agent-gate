@@ -16,7 +16,12 @@ Gate solves this by sitting between the agent and PowerShell — intercepting ev
 
 ```
 User
-  ↓ Hermes Desktop (Electron) or CLI / messaging app
+  ├─ (via messaging app: Feishu / Telegram / Discord / etc.)
+  │     ↓
+  │  Hermes Gateway (runs on cloud VM)
+  │     ↓
+  └─ (via Hermes Desktop: Electron GUI client)
+        ↓
 Cloud VM (Linux)
   └─ AI Agent (Hermes / Claude Code / Codex / any agent)
         ↓ SSH (user: agent-user)
@@ -33,7 +38,7 @@ Windows Machine
 
 This architecture was built for a specific real-world setup:
 
-1. **User connects to the cloud agent** through a frontend — [Hermes Desktop](https://github.com/NousResearch/hermes-agent) (Electron client), CLI, Telegram, Feishu/Lark, Discord, or any of Hermes' 18+ messaging platforms.
+1. **User talks to the agent** from anywhere — a chat app (Feishu, Telegram, Discord, etc.) or a desktop GUI ([Hermes Desktop](https://github.com/NousResearch/hermes-agent)). Messages go to the agent running on a cloud VM.
 
 2. **The agent lives on a cloud VM** (Linux, ~$5-15/month). It has internet access, can run code, call APIs, and search the web — but no direct access to your local files.
 
