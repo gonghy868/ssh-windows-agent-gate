@@ -61,6 +61,29 @@ This means you get a **cloud-powered AI agent** with **local Windows access**, w
 
 Cloud + Gate gives you the best of both: a 24/7 agent with local filesystem access.
 
+### Real-world walkthrough
+
+Here's what this setup looks like in daily use:
+
+> **"帮我看一下桌面上那份报价单里的数字对不对"**
+>
+> 1. I send this message in Feishu (or type it in Hermes Desktop)
+> 2. The agent on the cloud VM receives it, reads the file via SSH+Gate:
+>    `Get-Content "C:\Users\me\Desktop\报价单-2026-06-01.xlsx"`
+> 3. Gate lets the read through (no path restriction for reads)
+> 4. The agent extracts the numbers, compares them, writes a summary back to workspace:
+>    `Set-Content D:\agent-user\workspace\price-check-report.md -Value "..." `
+> 5. The summary lands on my Windows desktop as a file I can open immediately
+> 6. The agent replies in Feishu with the conclusion
+
+The Gate is invisible to the user — I talk to my agent normally, and it just *has* access to my local files without me needing to copy things to the cloud.
+
+Data flows both ways:
+- **Agent reads from Windows**: logs, configs, documents, screenshots, code files
+- **Agent writes to Windows**: reports, generated code, downloaded files, analysis results
+
+All via SSH commands, all through Gate. No cloud storage sync, no file upload portal, no shared drives.
+
 ## Three-Layer Defense
 
 ### Layer 1: Blacklist (Global, executed first)
