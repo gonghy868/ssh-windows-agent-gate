@@ -12,21 +12,49 @@ When your AI agent (running on a Linux cloud server) needs to read/write files o
 
 Gate solves this by sitting between the agent and PowerShell — intercepting every command, checking it against three layers of security, and only allowing safe operations.
 
-## Architecture
+## Full Architecture
 
 ```
-Agent (Cloud Linux)
-    ↓ SSH (user: agent-user)
-Windows OpenSSH Server
-    ↓ ForceCommand (sshd_config)
-Gate.ps1 (PowerShell script)
-    ↓ Blacklist → Read Whitelist → Write Path Check
-PowerShell (if allowed)
+User
+  ↓ Hermes Desktop (Electron) or CLI / messaging app
+Cloud VM (Linux)
+  └─ AI Agent (Hermes / Claude Code / Codex / any agent)
+        ↓ SSH (user: agent-user)
+Windows Machine
+  ├─ OpenSSH Server
+  │    └─ ForceCommand → Gate.ps1
+  │         ├─ Blacklist (global, executed first)
+  │         ├─ Read Whitelist (no path restriction)
+  │         └─ Write Path Restriction (workspace only)
+  └─ PowerShell (if Gate allows)
 ```
 
-- Gate is set as the **login shell** via sshd_config's `ForceCommand` for the agent user
-- Every SSH command passes through Gate before execution
-- Admin users bypass Gate entirely (no ForceCommand)
+### How the pieces fit
+
+This architecture was built for a specific real-world setup:
+
+1. **User connects to the cloud agent** through a frontend — [Hermes Desktop](https://github.com/NousResearch/hermes-agent) (Electron client), CLI, Telegram, Feishu/Lark, Discord, or any of Hermes' 18+ messaging platforms.
+
+2. **The agent lives on a cloud VM** (Linux, ~$5-15/month). It has internet access, can run code, call APIs, and search the web — but no direct access to your local files.
+
+3. **The agent reaches your Windows machine via SSH** and Gate controls every command. The agent can read files from anywhere on disk (to analyze logs, check configs, browse directories) and write files into a locked-down workspace directory (to deliver reports, generate code, save artifacts).
+
+4. **The workspace is shared** — files written by the agent appear immediately on your Windows desktop. Open them, edit them, move them, or feed them to other tools.
+
+This means you get a **cloud-powered AI agent** with **local Windows access**, without giving the agent free rein over your machine.
+
+### Why not run the agent on Windows directly?
+
+| Factor | Cloud Linux VM | Windows local |
+|--------|---------------|---------------|
+| Cost | $5-15/month | Free (existing hardware) |
+| Uptime | 24/7 | Depends on PC being on |
+| GPU access | Expensive | ✅ Dedicated GPU |
+| Agent ecosystem | ✅ Mature (Linux-first) | Limited |
+| Security isolation | ✅ Sandboxed by default | Gate needed |
+| File access | No local files | ✅ Full access |
+
+Cloud + Gate gives you the best of both: a 24/7 agent with local filesystem access.
 
 ## Three-Layer Defense
 
@@ -60,7 +88,7 @@ Redirect operators (`>`, `>>`) are blocked — agent cannot overwrite files usin
 
 ### Layer 3: Write Path Restriction (Exact match)
 
-Write operations are only allowed under `D:\agent-user\workspace\` (configurable). Commands:
+Write operations are only allowed under `D:\\agent-user\\workspace\\` (configurable). Commands:
 
 ```
 Set-Content, Add-Content, Out-File
@@ -69,7 +97,7 @@ Remove-Item, del, rm, erase
 Write-*, Clear-Content, Clear-Item
 ```
 
-The path check uses a trailing backslash to prevent prefix-bypass attacks (e.g. `workspace_data` cannot match `workspace\`).
+The path check uses a trailing backslash to prevent prefix-bypass attacks (e.g. `workspace_data` cannot match `workspace\\`).
 
 ## Usage
 
@@ -82,24 +110,24 @@ The path check uses a trailing backslash to prevent prefix-bypass attacks (e.g. 
 
 ```
 Match User agent-user
-    ForceCommand powershell -NoProfile -File "D:\path\to\ssh-gate.ps1"
+    ForceCommand powershell -NoProfile -File "D:\\path\\to\\ssh-gate.ps1"
 ```
 
 ### Reading Files
 
 ```powershell
 # Any path, read-only
-Get-Content D:\documents\report.txt
-dir C:\Users\*\Desktop\*
-Get-ChildItem D:\data\ -Recurse
+Get-Content D:\\documents\\report.txt
+dir C:\\Users\\*\\Desktop\\*
+Get-ChildItem D:\\data\\ -Recurse
 ```
 
 ### Writing Files (workspace only)
 
 ```powershell
 # Only under workspace directory
-Set-Content D:\agent-user\workspace\output.txt -Value "hello"
-New-Item -ItemType Directory D:\agent-user\workspace\projects\ -Force
+Set-Content D:\\agent-user\\workspace\\output.txt -Value "hello"
+New-Item -ItemType Directory D:\\agent-user\\workspace\\projects\\ -Force
 ```
 
 ### File Transfer
@@ -112,7 +140,7 @@ Workaround for file transfer:
 
 ### Claude Code Integration (Experimental)
 
-Gate has partial support for Claude Code CLI (`^claude\b`), allowing specific safe flags:
+Gate has partial support for Claude Code CLI (`^claude\\b`), allowing specific safe flags:
 
 ```
 claude --version        ✅ Pure info
@@ -133,7 +161,7 @@ This is **experimental** and requires Claude Code CLI installed in PATH.
 | Agent writes malware to system dir | Write restricted to workspace |
 | Agent runs shutdown / format / regedit | Blacklisted |
 | Agent chains commands (`&&`, `;`, `|`) | Blacklist runs first |
-| Agent tries `workspace_data` path | Trailing `\` prevents prefix match |
+| Agent tries `workspace_data` path | Trailing `\\` prevents prefix match |
 | Agent modifies Gate itself | Locked file (PowerShell holds handle) |
 | Agent writes to Startup folder | Not under workspace path |
 
@@ -144,8 +172,8 @@ This is **experimental** and requires Claude Code CLI installed in PATH.
 
 ### Attack Vectors Found During Development (v8.9 → v8.11)
 
-1. `dir \| Invoke-Expression` — pipe to IEX bypass
-2. `Remove-Item ...\workspace_data\...` — path prefix bypass
+1. `dir | Invoke-Expression` — pipe to IEX bypass
+2. `Remove-Item ...\\workspace_data\\...` — path prefix bypass
 3. `claude --help -p "shutdown /s"` — flag reuse to smuggle payload
 4. `claude --allowedTools "Bash"` — dangerous tool without Read oversight
 
@@ -159,7 +187,7 @@ This is **experimental** and requires Claude Code CLI installed in PATH.
 | v8.9 | Blacklist moved to top (prevent chaining bypass) |
 | v8.10 | `Invoke-Expression` added to blacklist |
 | v8.11 | Exact path matching with trailing backslash |
-| v8.12 | Fixed `\bclaude\b` → `^claude\b` (path false positive) |
+| v8.12 | Fixed `\\bclaude\\b` → `^claude\\b` (path false positive) |
 
 ## Related Work
 
